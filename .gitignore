@@ -38,3 +38,6 @@ local/adapters/
 local/merged/
 local/.venv/
 local/data/mlx/
+
+# run.py cloud state: last SageMaker job names (account-specific).
+local/cloud/

@@ -56,7 +56,7 @@ rows per route.
 ## How it was built
 
 - **Template splits:** generated offline by
-  [`local/gen_router_data.py`](https://github.com/solvren-ai/sample-slm-finetuning-and-evaluation-platform/blob/mac-local/local/gen_router_data.py),
+  [`local/gen_router_data.py`](https://github.com/solvren-ai/class1-router/blob/mac-local/local/gen_router_data.py),
   with no model calls. The grid is 4 domains (healthcare, legal, fintech, biotech) x 4 routes x
   12 core requests, and each core request gets 8 phrasing variants (a greeting, an urgency marker, a
   team prefix and so on) plus fictional slot values (drug name, contract type, assay, record id).

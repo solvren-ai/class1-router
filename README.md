@@ -117,8 +117,9 @@ container/  Pinned LLaMA-Factory training and eval image (Dockerfile, entrypoint
 frontend/   Vite + React + TypeScript + Cloudscape single-page app
 infra/      AWS CDK application (app.py, slm_platform_infra/stack.py)
 docs/       architecture diagram
-local/      Mac-only MLX train + eval path (no AWS) — see "Run locally on Mac"
+local/      Class 1 Decider router: local (MLX) + cloud CLI — see "Commands"
   gen_router_data.py     synthetic request-routing dataset generator
+  run.py                 single local/cloud entry point (wraps the files below + backend/app)
   mac_router.py          prep / LoRA train / eval driver, reuses container/eval.py
 ```
 
@@ -315,52 +316,108 @@ cd backend && .venv/bin/python -m pytest tests/    # pure logic; AWS mocked
 cd agent   && uv run -m pytest tests/ -q           # Bedrock mocked
 ```
 
-## Run locally on Mac
+## Commands
 
-The platform trains on SageMaker (the LLaMA-Factory image in `container/`) and evaluates with vLLM.
-Neither runs on Apple Silicon, so `local/` adds a small second path that trains and evaluates
-entirely on the Mac's GPU through [mlx-lm](https://github.com/ml-explore/mlx-lm) LoRA. It changes
-nothing in the platform: same `{"messages": [...]}` dataset contract, and scoring reuses
-`container/eval.py` so local numbers are comparable with SageMaker ones.
+`local/run.py` is one entry point for the Class 1 Decider router, with two modes: **local**, which
+trains and evaluates on an Apple Silicon Mac with [mlx-lm](https://github.com/ml-explore/mlx-lm), and
+**cloud**, which uses SageMaker with the platform's LLaMA-Factory image, vLLM eval and Bedrock baselines.
+It is a thin wrapper:
 
-No AWS account, no credentials and no network beyond the one-time model download from Hugging Face.
-
-Requirements: Apple Silicon, macOS, ~16GB RAM, [uv](https://docs.astral.sh/uv/), ~3GB free disk.
+- Local steps call `local/gen_router_data.py` and `local/mac_router.py`.
+- Cloud steps call the backend's own `orchestrate.launch_training_job`, `launch_eval_job`,
+  `launch_base_eval_job` and `baseline.run_sonnet_baseline`. Every row goes through the same
+  `{"messages": [...]}` contract and the `container/eval.py` scoring.
 
 ```bash
 cd local
-uv sync                                       # mlx-lm into local/.venv
+uv sync                                  # local only: mlx-lm
+uv sync --extra cloud                    # + sagemaker/boto3/pyyaml for the cloud path
 
-uv run python gen_router_data.py --demo       # self-check: no split leakage, labels balanced
-uv run python gen_router_data.py              # -> data/router/{train,valid,test}.jsonl
-uv run python mac_router.py prep              # -> data/mlx/ (mlx-lm input copy)
+uv run python run.py data                # dataset -> data/router/, data/mlx/ (same in both modes)
 
-uv run python mac_router.py train             # LoRA -> adapters/ (~2 min on an M5)
-uv run python mac_router.py fuse              # adapter merged into merged/
-uv run python mac_router.py eval              # 6 models x 2 test sets -> metrics/ (~20 min)
-uv run python mac_router.py table             # markdown summary of metrics/
+# Local (Mac, no AWS)
+uv run python run.py train --local       # LoRA -> adapters/ (~2 min on an M5)
+uv run python run.py fuse --local        # adapter merged into merged/
+uv run python run.py eval --local        # 6 models x 2 test sets -> metrics/ (~20 min)
+uv run python run.py all --local         # data -> train -> fuse -> eval -> table
+
+# Cloud (AWS account with the stack deployed)
+uv run python run.py train               # SageMaker training job (LLaMA-Factory image), ml.g5.xlarge
+uv run python run.py eval                # waits for training, then vLLM eval jobs (tuned + base)
+                                         # and Bedrock baselines on the same test rows
+uv run python run.py all                 # data -> train -> eval -> table
+uv run python run.py all --dry-run       # print every AWS request; nothing is sent
+
+# Either mode
+uv run python run.py table               # local metrics table (+ cloud results once jobs finish)
+uv run python run.py publish             # model + dataset -> Hugging Face SolvrenAI, private repos
+
+uv run python test_run.py                # self-check: argument parsing and mode dispatch
 ```
 
-`eval` compares the base model zero-shot and few-shot (2 training examples per route), the LoRA
-adapter, the fused model, and an un-tuned `mlx-community/Qwen3-4B-4bit` (2.3GB download) zero-shot and
-few-shot as a bigger-model reference.
+The local `eval` compares six models:
 
-Useful flags:
+- the base model, zero-shot and few-shot (2 training examples per route);
+- the LoRA adapter;
+- the fused model;
+- an untuned `mlx-community/Qwen3-4B-4bit` (2.3GB download), zero-shot and few-shot, as a
+  bigger-model reference.
+
+The cloud `eval` scores the trained model and the base model on SageMaker. It also scores the Bedrock
+baselines named by `--baselines` (default `haiku-4-5 nova-micro`; keys in `backend/app/baseline.py`).
+
+`all` never publishes. `publish` reads `HF_TOKEN` from the environment, or from `--env-file` (default
+`../.env` next to the repository), into memory only. It creates or updates **private** repos and
+refuses to upload to a repo that is public.
+
+Shared flags:
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--local` | off | run on this Mac with MLX instead of AWS |
+| `--dry-run` | off | cloud only: print each boto3 request (secrets redacted), return canned responses, block all network |
+| `--model` | `mlx-community/Qwen3-0.6B-bf16` local, `qwen3-0.6b` cloud | MLX repo id locally; `backend/app/catalog.py` id in the cloud |
+| `--region` | `us-east-1` | AWS region for the cloud path |
+| `--instance-type` | `ml.g5.xlarge` | SageMaker instance for the training and eval jobs |
+| `--iters`, `--limit`, `--out` | `400`, all rows, `local/` | smoke runs: LoRA iterations, eval rows, and a separate output dir so the real artifacts aren't overwritten |
+
+A smoke test of the whole local chain takes about 2 minutes:
 
 ```bash
-uv run python mac_router.py train --iters 200 --batch-size 1 --num-layers 4   # less memory
-uv run python mac_router.py eval --targets fused --tests handwritten         # one row
-uv run python mac_router.py eval --targets base --limit 32                     # quick smoke test
+uv run python run.py all --local --iters 20 --limit 16 --out /tmp/class1-smoke
 ```
 
-Everything written by these commands except the dataset and the metrics is a build artifact
-(`local/adapters/`, `local/merged/`, `local/data/mlx/`, `local/.venv/`) and is gitignored.
+### Cloud prerequisites
+
+- **Stack deployed:** run `cdk deploy` from `infra/` (see [Deploy](#deploy)). The cloud path uses
+  its data bucket, its SageMaker execution role and the LLaMA-Factory training image
+  (`OutTrainingImageUri`). The backend derives their default names from the account. When your
+  deployment differs, point it at the stack outputs:
+
+  ```bash
+  export SLM_S3_BUCKET=$(jq -r '.SlmPlatformInfra.OutDataBucket' ../infra/cdk-outputs.json)
+  export SLM_TRAINING_IMAGE_URI=$(jq -r '.SlmPlatformInfra.OutTrainingImageUri' ../infra/cdk-outputs.json)
+  ```
+
+- **Credentials:** valid AWS credentials for that account, through `AWS_PROFILE` or
+  `SLM_AWS_PROFILE`, or the ambient chain.
+- **Bedrock model access:** enable each model you list in `--baselines` (default Claude Haiku 4.5
+  and Amazon Nova Micro) under Bedrock **Model access** in `--region`.
+- **GPU quota:** the account needs a SageMaker Service Quota of at least 1 for
+  "ml.g5.xlarge for training job usage", or for whatever `--instance-type` you pick. New accounts
+  often start at 0.
+- **Cost:** `train` and `eval` launch billable jobs. Use `--dry-run` to review exactly what will be
+  sent.
+
+Build artifacts are gitignored: `local/adapters/`, `local/merged/`, `local/data/mlx/`,
+`local/cloud/` (the last cloud job names) and `local/.venv/`.
 
 ### What `local/` contains
 
 ```text
 local/gen_router_data.py   synthetic routing dataset generator (templates, offline, no PII/PHI)
-local/mac_router.py        prep / train / eval driver for the MLX path
+local/run.py               local/cloud CLI (`test_run.py` is its self-check)
+local/mac_router.py        prep / train / fuse / eval driver for the MLX path
 local/data/router/         committed dataset: train/valid/test.jsonl (templates) and
                            handwritten_test.jsonl (50 hand-written requests)
 local/metrics/             committed metrics_<model>_<testset>.json, train_time.json

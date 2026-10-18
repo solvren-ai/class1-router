@@ -22,6 +22,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 import time
@@ -32,10 +33,13 @@ HERE = Path(__file__).parent
 REPO = HERE.parent
 DATA = HERE / "data" / "router"
 MLX_DATA = HERE / "data" / "mlx"
-ADAPTERS = HERE / "adapters"
-FUSED = HERE / "merged"
-METRICS = HERE / "metrics"
-MODEL = "mlx-community/Qwen3-0.6B-bf16"
+# Run outputs. CLASS1_OUT redirects them (run.py smoke runs use it so they can't
+# overwrite the published adapter/model/metrics).
+OUT = Path(os.environ.get("CLASS1_OUT") or HERE)
+ADAPTERS = OUT / "adapters"
+FUSED = OUT / "merged"
+METRICS = OUT / "metrics"
+MODEL = os.environ.get("CLASS1_MODEL") or "mlx-community/Qwen3-0.6B-bf16"
 BIG = "mlx-community/Qwen3-4B-4bit"  # un-tuned "bigger model" reference
 # name -> (model, adapter, few_shot)
 TARGETS = {
@@ -79,6 +83,7 @@ def prep() -> None:
 
 def train(iters: int, batch_size: int, num_layers: int, max_seq_len: int, lr: float) -> None:
     ADAPTERS.mkdir(parents=True, exist_ok=True)
+    METRICS.mkdir(parents=True, exist_ok=True)
     cmd = [
         sys.executable, "-m", "mlx_lm", "lora",
         "--model", MODEL,
@@ -101,7 +106,6 @@ def train(iters: int, batch_size: int, num_layers: int, max_seq_len: int, lr: fl
     t0 = time.perf_counter()
     subprocess.run(cmd, check=True, cwd=HERE)
     secs = time.perf_counter() - t0
-    METRICS.mkdir(exist_ok=True)
     (METRICS / "train_time.json").write_text(
         json.dumps(
             {
@@ -213,7 +217,7 @@ def evaluate(target: str, test: str, max_tokens: int, limit: int | None) -> dict
     per_class, macro_f1 = _macro_f1(golds, preds)
     correct = sum(g == p for g, p in zip(golds, preds))
     lat = sorted(lat_ms)
-    rel = lambda p: str(Path(p).relative_to(HERE)) if Path(p).is_absolute() else str(p)  # noqa: E731
+    rel = lambda p: os.path.relpath(p, HERE) if Path(p).is_absolute() else str(p)  # noqa: E731
     return {
         "target": target,
         "test_set": test,
@@ -282,15 +286,19 @@ def main() -> None:
     elif a.cmd == "table":
         table()
     else:
-        METRICS.mkdir(exist_ok=True)
-        for target in a.targets:
-            for test in a.tests:
-                print(f"[eval] {target} on {test}", flush=True)
-                m = evaluate(target, test, a.max_tokens, a.limit)
-                out = METRICS / f"metrics_{target}_{test}.json"
-                out.write_text(json.dumps(m, indent=2), encoding="utf-8")
-                print(f"  acc={m['accuracy']} macro_f1={m['macro_f1']} "
-                      f"p50={m['latency_ms']['p50']}ms unparsed={m['unparsed']}", flush=True)
+        run_eval(a.targets, a.tests, a.max_tokens, a.limit)
+
+
+def run_eval(targets: list[str], tests: list[str], max_tokens: int, limit: int | None) -> None:
+    METRICS.mkdir(parents=True, exist_ok=True)
+    for target in targets:
+        for test in tests:
+            print(f"[eval] {target} on {test}", flush=True)
+            m = evaluate(target, test, max_tokens, limit)
+            out = METRICS / f"metrics_{target}_{test}.json"
+            out.write_text(json.dumps(m, indent=2), encoding="utf-8")
+            print(f"  acc={m['accuracy']} macro_f1={m['macro_f1']} "
+                  f"p50={m['latency_ms']['p50']}ms unparsed={m['unparsed']}", flush=True)
 
 if __name__ == "__main__":
     main()

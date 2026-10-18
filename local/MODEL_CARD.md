@@ -208,15 +208,10 @@ panel, and every hand-written prediction.
 
 ## How to reproduce
 
-From `local/` in the [source repository](https://github.com/solvren-ai/sample-slm-finetuning-and-evaluation-platform/tree/mac-local)
+From `local/` in the [source repository](https://github.com/solvren-ai/class1-router)
 (Apple Silicon, uv):
 
 ```bash
 uv sync
-uv run python gen_router_data.py
-uv run python mac_router.py prep
-uv run python mac_router.py train
-uv run python mac_router.py fuse
-uv run python mac_router.py eval      # all models x both test sets
-uv run python mac_router.py table
+uv run python run.py all --local      # data -> LoRA train -> fuse -> eval (all models x both test sets) -> table
 ```
