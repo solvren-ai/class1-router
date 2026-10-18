@@ -12,12 +12,12 @@ tags:
   - text-classification
   - request-routing
 datasets:
-  - synthetic
+  - SolvrenAI/class1-router-synthetic
 ---
 
-<!-- DRAFT — not published. Review before any upload to Hugging Face. -->
+<!-- DRAFT — private repo, pending review. -->
 
-# Class 1 Decider router (Qwen3-0.6B LoRA, MLX)
+# Class 1 Decider router (Qwen3-0.6B, MLX)
 
 A small request router. It reads one user request and replies with one of four routes, so a
 lightweight layer in front of LLM calls can decide which model or path handles it:
@@ -29,38 +29,82 @@ lightweight layer in front of LLM calls can decide which model or path handles i
 | `retrieval` | needs specific internal documents, records, or current external sources |
 | `refuse-or-escalate` | high-stakes individualized advice, another person's private records, or anything that needs a qualified human |
 
-This is a showcase of Solvren AI's "Class 1 Decider" pattern. It is a demo trained on synthetic data,
-not a production safety system.
+This is a showcase of the "Class 1 Decider" pattern from Solvren AI (AI forward deployment). It is a
+demo trained on synthetic data, not a production safety system.
+
+## Files
+
+- **Repository root:** the fused model, with the LoRA adapter merged into the base weights. It loads
+  standalone with `mlx_lm.load`.
+- **`adapter/`:** the LoRA adapter on its own (`adapters.safetensors`, 5.5MB, plus
+  `adapter_config.json`), to apply on top of `mlx-community/Qwen3-0.6B-bf16`.
 
 ## Model details
 
 - **Base model:** [Qwen/Qwen3-0.6B](https://huggingface.co/Qwen/Qwen3-0.6B) (Apache-2.0), loaded as the
   MLX conversion `mlx-community/Qwen3-0.6B-bf16`.
 - **Method:** LoRA, rank 8, last 8 transformer layers, 1.44M trainable parameters (0.24% of 596M),
-  loss masked to the assistant label (`--mask-prompt`).
+  loss masked to the assistant label. The adapter was then fused with `mlx_lm fuse`.
 - **Framework:** [mlx-lm](https://github.com/ml-explore/mlx-lm) 0.32.2 on Apple Silicon.
-- **Artifact:** LoRA adapter (`adapters.safetensors`, 5.5MB) plus `adapter_config.json`. Fuse it into
-  the base model with `mlx_lm fuse` for a standalone checkpoint.
-- **License:** Apache-2.0, inherited from the base model. The training code and dataset generator are
-  MIT-0, as is the rest of the repository.
+- **License:** Apache-2.0, inherited from the base model. The training code and dataset are MIT-0.
+
+## Routing prompt
+
+The model was trained with this exact system prompt, and it is part of the input contract. Use it
+verbatim. It is copied from `local/gen_router_data.py`:
+
+```python
+SYSTEM = (
+    "You are a request router. Classify the user's request into exactly one route and "
+    "reply with only the route name.\n"
+    "small-model: simple, well-scoped, low-risk text work (reformat, short summary, "
+    "extract, translate, classify).\n"
+    "frontier-model: complex multi-step reasoning, long-form drafting, nuanced analysis.\n"
+    "retrieval: needs specific internal documents, records, or current external sources.\n"
+    "refuse-or-escalate: high-stakes individualized advice, another person's private "
+    "records, or anything that needs a qualified human."
+)
+```
+
+## Use
+
+```python
+from mlx_lm import load, generate
+
+SYSTEM = (
+    "You are a request router. Classify the user's request into exactly one route and "
+    "reply with only the route name.\n"
+    "small-model: simple, well-scoped, low-risk text work (reformat, short summary, "
+    "extract, translate, classify).\n"
+    "frontier-model: complex multi-step reasoning, long-form drafting, nuanced analysis.\n"
+    "retrieval: needs specific internal documents, records, or current external sources.\n"
+    "refuse-or-escalate: high-stakes individualized advice, another person's private "
+    "records, or anything that needs a qualified human."
+)
+
+model, tok = load("SolvrenAI/class1-router-qwen3-0.6b-mlx")
+msgs = [
+    {"role": "system", "content": SYSTEM},
+    {"role": "user", "content": "Summarize this lab report in one sentence."},
+]
+prompt = tok.apply_chat_template(msgs, add_generation_prompt=True, tokenize=False, enable_thinking=False)
+print(generate(model, tok, prompt=prompt, max_tokens=8))  # -> small-model
+```
+
+To use the adapter instead of the fused model, download the repository and call
+`load("mlx-community/Qwen3-0.6B-bf16", adapter_path="<local path>/adapter")`.
 
 ## Training data
 
-1,536 synthetic examples generated offline from templates by `local/gen_router_data.py`, with no
-model calls, no AWS and no real PII or PHI. Every name, record id and company is a fictional
-placeholder.
+The training data is [SolvrenAI/class1-router-synthetic](https://huggingface.co/datasets/SolvrenAI/class1-router-synthetic):
+1,536 template-generated rows split 1,024 train / 256 validation / 256 test, plus a 50-row
+hand-written test set.
 
 - **Domains:** healthcare, legal, fintech, biotech.
-- **Construction:** 4 domains x 4 routes x 12 core requests, with 8 phrasing variants each (greeting,
-  urgency marker, team prefix and so on) and fictional slot values (drug, contract type, assay).
-- **Splits:** 1,024 train / 256 valid / 256 test, balanced across the routes. Splitting is by **core
-  request**: a request and all of its variants land in one split, so the test set holds requests the
-  model never saw in any phrasing.
-- **`refuse-or-escalate`** is built from benign escalation triggers (urgent symptoms, individualized
-  medical, legal or financial decisions, another person's records, skipping a required human
-  approval), not from examples of harmful instructions.
-- **Format:** the repository's canonical chat JSONL (`{"messages": [system, user, assistant]}`).
-  The system turn carries the route definitions, and the assistant turn is the bare label.
+- **Privacy:** no real PII or PHI.
+- **Leakage control:** splitting is by core request, so test requests never appear in training in
+  any phrasing.
+- **`refuse-or-escalate`:** built from benign escalation triggers, not harmful instructions.
 
 ## Training procedure
 
@@ -74,84 +118,105 @@ placeholder.
 | Hardware | Apple M5, 16GB unified memory, shared with other local workloads |
 | Wall-clock | 110 s |
 
-Validation loss went from 5.80 before training to 0.083 at iteration 100. Training loss was about
-0.000 by iteration 240.
-
 ## Evaluation
 
-Held-out test set: 256 requests (64 per route), greedy decoding (temperature 0, max 32 new tokens),
-`enable_thinking=False` in the Qwen3 chat template, and the same prompt for both models. Answers are
-scored after the repository's `container/eval.py` scaffold stripping, and a generation that does
-not contain one of the four route names counts as wrong.
+Every model gets the same system prompt, greedy decoding (temperature 0, max 32 new tokens) and
+`enable_thinking=False`. Answers pass through the repository's `container/eval.py` scaffold
+stripping. A generation that doesn't contain one of the four route names counts as wrong
+("unparsed").
 
-| Metric | Base Qwen3-0.6B | Fine-tuned |
+The rows compared:
+
+- **base:** Qwen3-0.6B zero-shot.
+- **base-fewshot:** Qwen3-0.6B with 8 labelled examples in the prompt (2 per route, drawn from train
+  only).
+- **tuned:** Qwen3-0.6B with the LoRA adapter, unfused.
+- **fused:** this model.
+- **4b, 4b-fewshot:** `mlx-community/Qwen3-4B-4bit`, not fine-tuned, zero-shot and with the same 8
+  examples, as a bigger-model reference.
+
+There are two test sets:
+
+- **template:** 256 held-out rows from the generator.
+- **handwritten:** 50 requests written by hand in a different style, with typos and lowercase, mixed
+  lengths, and general business requests outside the four training domains.
+
+| Model | Test set | n | Accuracy | Macro F1 | Unparsed | p50 ms | p90 ms |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| base | template | 256 | 0.098 | 0.163 | 228 | 216 | 330 |
+| base-fewshot | template | 256 | 0.469 | 0.422 | 21 | 281 | 398 |
+| tuned | template | 256 | 0.992 | 0.992 | 0 | 239 | 362 |
+| **fused** | template | 256 | **0.996** | **0.996** | 0 | **196** | 289 |
+| 4b | template | 256 | 0.887 | 0.888 | 0 | 383 | 738 |
+| 4b-fewshot | template | 256 | 0.894 | 0.893 | 1 | 585 | 1130 |
+| base | handwritten | 50 | 0.060 | 0.100 | 47 | 196 | 357 |
+| base-fewshot | handwritten | 50 | 0.400 | 0.336 | 5 | 317 | 745 |
+| tuned | handwritten | 50 | 0.880 | 0.883 | 0 | 350 | 669 |
+| **fused** | handwritten | 50 | **0.880** | **0.883** | 0 | **137** | 280 |
+| 4b | handwritten | 50 | 0.900 | 0.897 | 0 | 382 | 628 |
+| 4b-fewshot | handwritten | 50 | 0.840 | 0.893 | 7 | 724 | 884 |
+
+Per-class F1 for the fused model:
+
+| Route | Template | Handwritten |
 | --- | --- | --- |
-| Accuracy | 0.098 | **0.992** |
-| Macro F1 | 0.163 | **0.992** |
-| Unparseable outputs | 228 / 256 | 0 / 256 |
-| Latency p50 (ms / request) | 209.9 | 246.5 |
-| Latency p90 (ms / request) | 334.4 | 360.2 |
-| Latency p99 (ms / request) | 631.7 | 513.7 |
+| `small-model` | 1.000 | 0.870 |
+| `frontier-model` | 0.992 | 0.917 |
+| `retrieval` | 1.000 | 0.917 |
+| `refuse-or-escalate` | 0.992 | 0.828 |
 
-Per-class F1:
+### What the numbers say
 
-| Route | Base | Fine-tuned |
-| --- | --- | --- |
-| `small-model` | 0.031 | 0.992 |
-| `frontier-model` | 0.030 | 0.985 |
-| `retrieval` | 0.222 | 1.000 |
-| `refuse-or-escalate` | 0.370 | 0.992 |
+- **The template test set is easy.** 0.996 there mostly shows that the model learned the template
+  family. The hand-written set is the more honest signal: **0.88**, with 6 errors in 50.
+- **The fused 0.6B model roughly matches an untuned 4B model on hand-written requests** (0.88 vs
+  0.90) at about a third of the p50 latency. The 4B model is far ahead of the untuned 0.6B in either
+  prompting mode.
+- **The two models fail in different directions.** Five of the fused model's 6 hand-written errors
+  route a harmless request to `refuse-or-escalate`, such as a billing-or-scheduling email triage, or
+  asking who the on-call pharmacist is. That over-escalation costs a human hand-off. The 4B model
+  instead sent 4 of 12 escalation cases to `retrieval`: a coworker's salary, another patient's
+  results, releasing an out-of-spec batch, a list of flagged customers. For a router in a regulated
+  setting, that miss is the more dangerous error.
+- **Few-shot prompting helps the 0.6B base (0.06 to 0.40) but not the 4B (0.90 to 0.84).** With
+  examples in the prompt, the 4B often just performed the request (it wrote the bullets, translated
+  the text) instead of routing it.
+- **Fusing cuts latency** with no change in hand-written accuracy: p50 dropped from 239 ms to 196 ms on
+  the template set, measured back to back, because the separate LoRA matmuls are gone.
+- **Latency figures are approximate.** They are single-request mlx-lm Python API calls on a shared
+  16GB M5 that was running other ML jobs at the same time, so tail latency (p90/p99) is noisy and
+  some rows ran under heavier load than others. Compare p50 values within one run, and re-measure on
+  your own hardware.
 
-The fine-tuned model made two errors, and both went to `frontier-model`: one `small-model` request and
-one `refuse-or-escalate` request.
-
-The base model mostly ignores the label set and invents its own routes (`simple`, `legal`,
-`route: critique-and-propose-...`). That failure to follow the output format explains most of its
-low score.
-
-Latency is single-request generation on the M5 through the mlx-lm Python API, with the adapter
-**unfused**. The extra LoRA matmuls explain why the tuned p50 is higher than the base. Fusing the
-adapter should bring it back to roughly base-model cost, but that has not been measured.
-
-The full metric JSON, including the repository's own `compute_metrics` panel, is in
-`local/metrics/metrics_base.json`, `local/metrics/metrics_tuned.json` and
-`local/metrics/train_time.json`.
+Full metric JSON is in `local/metrics/metrics_<model>_<testset>.json` in the source repository. It
+includes per-class precision and recall, confusion matrices, the platform's own `compute_metrics`
+panel, and every hand-written prediction.
 
 ## Limitations
 
-- **Synthetic and templated.** The test set holds out core requests, but they come from the same
-  template family and the same writer as the training set. Real traffic is messier, so expect
-  noticeably lower accuracy on real requests. Before relying on this router, evaluate it on a
-  labelled sample of your own traffic.
-- **English only, four domains, four routes.** Requests outside healthcare, legal, fintech and
-  biotech have not been evaluated.
-- **The system prompt is part of the contract.** The model was trained with the route definitions in
-  the system turn. Change them and it needs retraining.
+- **Synthetic training data from one template family.** Expect lower accuracy on real traffic than
+  even the hand-written number suggests. Evaluate on a labelled sample of your own requests first.
+- **Over-escalation.** The model leans toward `refuse-or-escalate` on short, unfamiliar requests.
+  That fails safe, but it will push extra traffic to a human queue.
+- **Small hand-written set.** At n=50, one error moves accuracy by 2 points.
+- **English only; four domains.** General business requests were only spot-checked in the
+  hand-written set.
+- **The system prompt is part of the contract.** Change the route definitions and the model needs
+  retraining.
 - **Not a safety classifier.** `refuse-or-escalate` is a routing hint for a human-in-the-loop path.
   It must not be the only control on regulated or unsafe requests.
 
 ## How to reproduce
 
-From `local/` in the repository (Apple Silicon, uv):
+From `local/` in the [source repository](https://github.com/solvren-ai/sample-slm-finetuning-and-evaluation-platform/tree/mac-local)
+(Apple Silicon, uv):
 
 ```bash
 uv sync
 uv run python gen_router_data.py
 uv run python mac_router.py prep
 uv run python mac_router.py train
-uv run python mac_router.py eval
-```
-
-## Use
-
-```python
-from mlx_lm import load, generate
-
-model, tok = load("mlx-community/Qwen3-0.6B-bf16", adapter_path="adapters")
-msgs = [
-    {"role": "system", "content": SYSTEM},  # the exact routing prompt from gen_router_data.py
-    {"role": "user", "content": "Summarize this lab report in one sentence."},
-]
-prompt = tok.apply_chat_template(msgs, add_generation_prompt=True, tokenize=False, enable_thinking=False)
-print(generate(model, tok, prompt=prompt, max_tokens=8))  # -> small-model
+uv run python mac_router.py fuse
+uv run python mac_router.py eval      # all models x both test sets
+uv run python mac_router.py table
 ```

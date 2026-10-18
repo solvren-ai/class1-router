@@ -1,6 +1,9 @@
 {
+  "target": "tuned",
+  "test_set": "template",
   "model": "mlx-community/Qwen3-0.6B-bf16",
   "adapter": "adapters",
+  "few_shot_examples": 0,
   "count": 256,
   "accuracy": 0.9922,
   "macro_f1": 0.9922,
@@ -48,10 +51,10 @@
     }
   },
   "latency_ms": {
-    "mean": 266.0,
-    "p50": 246.5,
-    "p90": 360.2,
-    "p99": 513.7
+    "mean": 268.0,
+    "p50": 238.6,
+    "p90": 361.5,
+    "p99": 460.7
   },
   "platform_metrics": {
     "count": 256,
@@ -105,5 +108,6 @@
     "temperature": 0.0,
     "max_new_tokens": 32,
     "seed": 42
-  }
+  },
+  "predictions": null
 }

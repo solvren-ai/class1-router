@@ -336,26 +336,36 @@ uv run python gen_router_data.py              # -> data/router/{train,valid,test
 uv run python mac_router.py prep              # -> data/mlx/ (mlx-lm input copy)
 
 uv run python mac_router.py train             # LoRA -> adapters/ (~2 min on an M5)
-uv run python mac_router.py eval              # base + fine-tuned -> metrics/metrics_*.json
+uv run python mac_router.py fuse              # adapter merged into merged/
+uv run python mac_router.py eval              # 6 models x 2 test sets -> metrics/ (~20 min)
+uv run python mac_router.py table             # markdown summary of metrics/
 ```
+
+`eval` compares the base model zero-shot and few-shot (2 training examples per route), the LoRA
+adapter, the fused model, and an un-tuned `mlx-community/Qwen3-4B-4bit` (2.3GB download) zero-shot and
+few-shot as a bigger-model reference.
 
 Useful flags:
 
 ```bash
 uv run python mac_router.py train --iters 200 --batch-size 1 --num-layers 4   # less memory
-uv run python mac_router.py eval --which base --limit 32                      # quick smoke test
+uv run python mac_router.py eval --targets fused --tests handwritten         # one row
+uv run python mac_router.py eval --targets base --limit 32                     # quick smoke test
 ```
 
 Everything written by these commands except the dataset and the metrics is a build artifact
-(`local/adapters/`, `local/data/mlx/`, `local/.venv/`) and is gitignored.
+(`local/adapters/`, `local/merged/`, `local/data/mlx/`, `local/.venv/`) and is gitignored.
 
 ### What `local/` contains
 
 ```text
 local/gen_router_data.py   synthetic routing dataset generator (templates, offline, no PII/PHI)
 local/mac_router.py        prep / train / eval driver for the MLX path
-local/data/router/         committed dataset: train.jsonl, valid.jsonl, test.jsonl
-local/metrics/             committed metrics_base.json, metrics_tuned.json, train_time.json
+local/data/router/         committed dataset: train/valid/test.jsonl (templates) and
+                           handwritten_test.jsonl (50 hand-written requests)
+local/metrics/             committed metrics_<model>_<testset>.json, train_time.json
+local/MODEL_CARD.md        Hugging Face model card (SolvrenAI/class1-router-qwen3-0.6b-mlx)
+local/DATASET_CARD.md      Hugging Face dataset card (SolvrenAI/class1-router-synthetic)
 ```
 
 ### The routing task
@@ -375,16 +385,22 @@ This is the same methodology rule `backend/app/split.py` enforces for the hosted
 ### Reference result
 
 Qwen3-0.6B (Apache-2.0) with LoRA on an Apple M5 with 16GB: 1,024 training rows, 400 iterations,
-110 seconds of training. The test set is 256 held-out requests with greedy decoding:
+110 seconds of training, then fused. Greedy decoding throughout. `template` is the 256 held-out
+generator rows. `handwritten` is 50 hand-written requests in a different style.
 
-| | Base Qwen3-0.6B | Fine-tuned |
-| --- | --- | --- |
-| Accuracy | 0.098 | 0.992 |
-| Macro F1 | 0.163 | 0.992 |
-| p50 latency / request | 210 ms | 247 ms (adapter unfused) |
+| Model | template acc | handwritten acc | p50 ms (template) |
+| --- | --- | --- | --- |
+| Qwen3-0.6B zero-shot | 0.098 | 0.060 | 216 |
+| Qwen3-0.6B few-shot | 0.469 | 0.400 | 281 |
+| Qwen3-0.6B + LoRA (unfused) | 0.992 | 0.880 | 239 |
+| **Qwen3-0.6B fused** | **0.996** | **0.880** | **196** |
+| Qwen3-4B-4bit zero-shot (not tuned) | 0.887 | 0.900 | 383 |
+| Qwen3-4B-4bit few-shot (not tuned) | 0.894 | 0.840 | 585 |
 
-The data is synthetic, so treat these numbers as a demonstration of the pipeline, not as a measure
-of real-traffic accuracy. Per-class F1, the confusion matrix and limitations are in
+The template set is easy, so read the hand-written column. There, the fused 0.6B model roughly
+matches an untuned 4B model at about half its p50 latency, and it errs toward over-escalation where
+the 4B misses escalation cases. Latency was measured on a shared machine and is approximate. Full
+numbers, per-class F1, error analysis and limitations are in
 [`local/MODEL_CARD.md`](local/MODEL_CARD.md).
 
 ## Cost

@@ -12,7 +12,9 @@ data contract and scoring code:
 
     uv run python mac_router.py prep      # mlx-ready copy of the dataset
     uv run python mac_router.py train     # LoRA fine-tune (adapters/)
-    uv run python mac_router.py eval      # base + fine-tuned -> metrics JSON
+    uv run python mac_router.py fuse      # adapter fused into merged/
+    uv run python mac_router.py eval      # every target x test set -> metrics/
+    uv run python mac_router.py table     # markdown summary of metrics/
 """
 
 from __future__ import annotations
@@ -31,8 +33,21 @@ REPO = HERE.parent
 DATA = HERE / "data" / "router"
 MLX_DATA = HERE / "data" / "mlx"
 ADAPTERS = HERE / "adapters"
+FUSED = HERE / "merged"
 METRICS = HERE / "metrics"
 MODEL = "mlx-community/Qwen3-0.6B-bf16"
+BIG = "mlx-community/Qwen3-4B-4bit"  # un-tuned "bigger model" reference
+# name -> (model, adapter, few_shot)
+TARGETS = {
+    "base": (MODEL, None, False),
+    "base-fewshot": (MODEL, None, True),
+    "tuned": (MODEL, ADAPTERS, False),
+    "fused": (FUSED, None, False),
+    "4b": (BIG, None, False),
+    "4b-fewshot": (BIG, None, True),
+}
+TEST_FILES = {"template": "test.jsonl", "handwritten": "handwritten_test.jsonl"}
+SHOTS_PER_ROUTE = 2
 LABELS = ["small-model", "frontier-model", "retrieval", "refuse-or-escalate"]
 
 
@@ -139,40 +154,72 @@ def _macro_f1(golds: list[str], preds: list[str]) -> tuple[dict, float]:
     return per_class, round(sum(f1s) / len(f1s), 4)
 
 
-def evaluate(adapter: Path | None, max_tokens: int, limit: int | None) -> dict:
+def _read(path: Path) -> list[dict]:
+    return [json.loads(l) for l in path.read_text(encoding="utf-8").splitlines() if l.strip()]
+
+
+def _few_shot_turns() -> list[dict]:
+    """SHOTS_PER_ROUTE labelled examples per route, drawn from TRAIN only, as
+    prior user/assistant turns. Fixed seed so every model sees the same shots."""
+    import random
+
+    rng = random.Random(42)
+    rows = _read(DATA / "train.jsonl")
+    rng.shuffle(rows)
+    shots = []
+    for lab in LABELS:
+        shots += [r for r in rows if r["messages"][-1]["content"] == lab][:SHOTS_PER_ROUTE]
+    rng.shuffle(shots)
+    turns = []
+    for r in shots:
+        turns += [r["messages"][1], r["messages"][2]]
+    return turns
+
+
+def fuse() -> None:
+    cmd = [sys.executable, "-m", "mlx_lm", "fuse", "--model", MODEL,
+           "--adapter-path", str(ADAPTERS), "--save-path", str(FUSED)]
+    print(" ".join(cmd))
+    subprocess.run(cmd, check=True, cwd=HERE)
+
+
+def evaluate(target: str, test: str, max_tokens: int, limit: int | None) -> dict:
     from mlx_lm import generate, load
 
+    model_id, adapter, few_shot = TARGETS[target]
     ev = _platform_eval()
-    rows = [
-        json.loads(line)
-        for line in (DATA / "test.jsonl").read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
-    if limit:
-        rows = rows[:limit]
+    rows = _read(DATA / TEST_FILES[test])[:limit]
+    shots = _few_shot_turns() if few_shot else []
 
-    model, tokenizer = load(MODEL, adapter_path=str(adapter) if adapter else None)
+    model, tokenizer = load(str(model_id), adapter_path=str(adapter) if adapter else None)
+    # One warm-up call so the first row doesn't carry compile/cache cost.
+    generate(model, tokenizer, prompt="hi", max_tokens=1, verbose=False)
     preds_raw, golds, lat_ms = [], [], []
     for i, row in enumerate(rows):
         msgs = row["messages"]
         golds.append(msgs[-1]["content"])
         prompt = tokenizer.apply_chat_template(
-            msgs[:-1], add_generation_prompt=True, tokenize=False, enable_thinking=False
+            [msgs[0], *shots, *msgs[1:-1]],
+            add_generation_prompt=True, tokenize=False, enable_thinking=False,
         )
         t0 = time.perf_counter()
         out = generate(model, tokenizer, prompt=prompt, max_tokens=max_tokens, verbose=False)
         lat_ms.append((time.perf_counter() - t0) * 1000)
         preds_raw.append(out)
-        if (i + 1) % 32 == 0:
+        if (i + 1) % 64 == 0:
             print(f"  {i+1}/{len(rows)}", flush=True)
 
     preds = [_route_of(p, ev) for p in preds_raw]
     per_class, macro_f1 = _macro_f1(golds, preds)
     correct = sum(g == p for g, p in zip(golds, preds))
     lat = sorted(lat_ms)
+    rel = lambda p: str(Path(p).relative_to(HERE)) if Path(p).is_absolute() else str(p)  # noqa: E731
     return {
-        "model": MODEL,
-        "adapter": str(adapter.relative_to(HERE)) if adapter else None,
+        "target": target,
+        "test_set": test,
+        "model": rel(model_id),
+        "adapter": rel(adapter) if adapter else None,
+        "few_shot_examples": len(shots) // 2,
         "count": len(rows),
         "accuracy": round(correct / len(rows), 4),
         "macro_f1": macro_f1,
@@ -191,12 +238,30 @@ def evaluate(adapter: Path | None, max_tokens: int, limit: int | None) -> dict:
         # same predictions, so local runs are comparable to SageMaker runs.
         "platform_metrics": ev.compute_metrics(preds_raw, golds),
         "decoding": {"temperature": 0.0, "max_new_tokens": max_tokens, "seed": 42},
+        "predictions": [
+            {"user": r["messages"][-2]["content"], "gold": g, "pred": p, "raw": raw}
+            for r, g, p, raw in zip(rows, golds, preds, preds_raw)
+        ] if test == "handwritten" else None,
     }
+
+
+def table() -> None:
+    """Markdown summary of every metrics/metrics_<target>_<test>.json present."""
+    print("| Model | Test set | n | Accuracy | Macro F1 | Unparsed | p50 ms | p90 ms |")
+    print("| --- | --- | --- | --- | --- | --- | --- | --- |")
+    for test in TEST_FILES:
+        for target in TARGETS:
+            f = METRICS / f"metrics_{target}_{test}.json"
+            if f.exists():
+                m = json.loads(f.read_text())
+                L = m["latency_ms"]
+                print(f"| {target} | {test} | {m['count']} | {m['accuracy']:.3f} | "
+                      f"{m['macro_f1']:.3f} | {m['unparsed']} | {L['p50']:.0f} | {L['p90']:.0f} |")
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("cmd", choices=["prep", "train", "eval"])
+    ap.add_argument("cmd", choices=["prep", "train", "fuse", "eval", "table"])
     ap.add_argument("--iters", type=int, default=400)
     ap.add_argument("--batch-size", type=int, default=2)
     ap.add_argument("--num-layers", type=int, default=8)
@@ -204,24 +269,28 @@ def main() -> None:
     ap.add_argument("--learning-rate", type=float, default=1e-4)
     ap.add_argument("--max-tokens", type=int, default=32)
     ap.add_argument("--limit", type=int, default=None, help="eval only the first N test rows")
-    ap.add_argument("--which", choices=["base", "tuned", "both"], default="both")
+    ap.add_argument("--targets", nargs="+", choices=list(TARGETS), default=list(TARGETS))
+    ap.add_argument("--tests", nargs="+", choices=list(TEST_FILES), default=list(TEST_FILES))
     a = ap.parse_args()
 
     if a.cmd == "prep":
         prep()
     elif a.cmd == "train":
         train(a.iters, a.batch_size, a.num_layers, a.max_seq_length, a.learning_rate)
+    elif a.cmd == "fuse":
+        fuse()
+    elif a.cmd == "table":
+        table()
     else:
         METRICS.mkdir(exist_ok=True)
-        targets = {"base": None, "tuned": ADAPTERS}
-        for name in ["base", "tuned"] if a.which == "both" else [a.which]:
-            print(f"[eval] {name}")
-            m = evaluate(targets[name], a.max_tokens, a.limit)
-            out = METRICS / f"metrics_{name}.json"
-            out.write_text(json.dumps(m, indent=2), encoding="utf-8")
-            print(f"  acc={m['accuracy']} macro_f1={m['macro_f1']} "
-                  f"p50={m['latency_ms']['p50']}ms unparsed={m['unparsed']} -> {out}")
-
+        for target in a.targets:
+            for test in a.tests:
+                print(f"[eval] {target} on {test}", flush=True)
+                m = evaluate(target, test, a.max_tokens, a.limit)
+                out = METRICS / f"metrics_{target}_{test}.json"
+                out.write_text(json.dumps(m, indent=2), encoding="utf-8")
+                print(f"  acc={m['accuracy']} macro_f1={m['macro_f1']} "
+                      f"p50={m['latency_ms']['p50']}ms unparsed={m['unparsed']}", flush=True)
 
 if __name__ == "__main__":
     main()
