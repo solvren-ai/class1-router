@@ -1,0 +1,6 @@
+[project]
+name = "slm-local-mac"
+version = "0.1.0"
+description = "Local Apple Silicon (MLX) train + eval path for the SLM platform"
+requires-python = ">=3.11"
+dependencies = ["mlx-lm>=0.28"]

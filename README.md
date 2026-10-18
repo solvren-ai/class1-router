@@ -117,6 +117,9 @@ container/  Pinned LLaMA-Factory training and eval image (Dockerfile, entrypoint
 frontend/   Vite + React + TypeScript + Cloudscape single-page app
 infra/      AWS CDK application (app.py, slm_platform_infra/stack.py)
 docs/       architecture diagram
+local/      Mac-only MLX train + eval path (no AWS) — see "Run locally on Mac"
+  gen_router_data.py     synthetic request-routing dataset generator
+  mac_router.py          prep / LoRA train / eval driver, reuses container/eval.py
 ```
 
 ## Prerequisites
@@ -311,6 +314,78 @@ Tests:
 cd backend && .venv/bin/python -m pytest tests/    # pure logic; AWS mocked
 cd agent   && uv run -m pytest tests/ -q           # Bedrock mocked
 ```
+
+## Run locally on Mac
+
+The platform trains on SageMaker (the LLaMA-Factory image in `container/`) and evaluates with vLLM.
+Neither runs on Apple Silicon, so `local/` adds a small second path that trains and evaluates
+entirely on the Mac's GPU through [mlx-lm](https://github.com/ml-explore/mlx-lm) LoRA. It changes
+nothing in the platform: same `{"messages": [...]}` dataset contract, and scoring reuses
+`container/eval.py` so local numbers are comparable with SageMaker ones.
+
+No AWS account, no credentials and no network beyond the one-time model download from Hugging Face.
+
+Requirements: Apple Silicon, macOS, ~16GB RAM, [uv](https://docs.astral.sh/uv/), ~3GB free disk.
+
+```bash
+cd local
+uv sync                                       # mlx-lm into local/.venv
+
+uv run python gen_router_data.py --demo       # self-check: no split leakage, labels balanced
+uv run python gen_router_data.py              # -> data/router/{train,valid,test}.jsonl
+uv run python mac_router.py prep              # -> data/mlx/ (mlx-lm input copy)
+
+uv run python mac_router.py train             # LoRA -> adapters/ (~2 min on an M5)
+uv run python mac_router.py eval              # base + fine-tuned -> metrics/metrics_*.json
+```
+
+Useful flags:
+
+```bash
+uv run python mac_router.py train --iters 200 --batch-size 1 --num-layers 4   # less memory
+uv run python mac_router.py eval --which base --limit 32                      # quick smoke test
+```
+
+Everything written by these commands except the dataset and the metrics is a build artifact
+(`local/adapters/`, `local/data/mlx/`, `local/.venv/`) and is gitignored.
+
+### What `local/` contains
+
+```text
+local/gen_router_data.py   synthetic routing dataset generator (templates, offline, no PII/PHI)
+local/mac_router.py        prep / train / eval driver for the MLX path
+local/data/router/         committed dataset: train.jsonl, valid.jsonl, test.jsonl
+local/metrics/             committed metrics_base.json, metrics_tuned.json, train_time.json
+```
+
+### The routing task
+
+The dataset is the "Class 1 Decider" showcase: a lightweight router that sits in front of LLM calls
+and picks who handles each request. Four routes — `small-model`, `frontier-model`, `retrieval`,
+`refuse-or-escalate` — across healthcare, legal, fintech and biotech. The generator is template-based
+and runs offline; every name, record id and company is a fictional placeholder, and the
+`refuse-or-escalate` class is built from benign escalation triggers (urgent symptoms, individualized
+high-stakes advice, another person's records, a skipped human approval), not from examples of
+harmful instructions.
+
+Splitting is by **core request**, not by row: a request and all of its phrasing variants land in one
+split, so the test set measures generalisation to unseen requests rather than memorised templates.
+This is the same methodology rule `backend/app/split.py` enforces for the hosted flow.
+
+### Reference result
+
+Qwen3-0.6B (Apache-2.0) with LoRA on an Apple M5 with 16GB: 1,024 training rows, 400 iterations,
+110 seconds of training. The test set is 256 held-out requests with greedy decoding:
+
+| | Base Qwen3-0.6B | Fine-tuned |
+| --- | --- | --- |
+| Accuracy | 0.098 | 0.992 |
+| Macro F1 | 0.163 | 0.992 |
+| p50 latency / request | 210 ms | 247 ms (adapter unfused) |
+
+The data is synthetic, so treat these numbers as a demonstration of the pipeline, not as a measure
+of real-traffic accuracy. Per-class F1, the confusion matrix and limitations are in
+[`local/MODEL_CARD.md`](local/MODEL_CARD.md).
 
 ## Cost
 
