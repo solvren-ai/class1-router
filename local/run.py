@@ -24,6 +24,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import time
 from contextlib import contextmanager
@@ -130,7 +131,7 @@ def step_table(a: argparse.Namespace) -> None:
     import mac_router
 
     mac_router.table()
-    if not a.local and (CLOUD_STATE / "eval.json").exists():
+    if not a.local and not a.dry_run and (CLOUD_STATE / "eval.json").exists():  # real job state only
         _cloud_table(a)
 
 
@@ -190,11 +191,14 @@ def step_eval_cloud(a: argparse.Namespace) -> None:
     orchestrate, _, catalog, baseline = _backend(a)
     state = _load_state("train") if not a.dry_run else {
         "jobName": "slm-dry-run-train", "splitId": _persist_split(a), "model": a.model or DEFAULT_CLOUD_MODEL}
-    decoding = catalog.DecodingParams(max_new_tokens=32)
+    # Qwen3 is a reasoning family: like the backend's own eval callers, raise the
+    # budget so its <think> block closes instead of being stripped to a 0 score.
+    decoding = catalog.DecodingParams(max_new_tokens=catalog.reasoning_eval_floor([state["model"]], 32))
     stamp = time.strftime("%Y%m%d-%H%M%S")
 
     # Block until the training job finishes (immediate in --dry-run).
-    sm = orchestrate.get_session(region_name=a.region).client("sagemaker")
+    _, boto_sess = orchestrate._session(orchestrate.load_aws_config())  # same profile/region as the jobs
+    sm = boto_sess.client("sagemaker")
     print(f"[eval] waiting for {state['jobName']} ...", flush=True)
     sm.get_waiter("training_job_completed_or_stopped").wait(TrainingJobName=state["jobName"])
 
@@ -203,14 +207,13 @@ def step_eval_cloud(a: argparse.Namespace) -> None:
     base = orchestrate.launch_base_eval_job(state["model"], state["splitId"], decoding, stamp,
                                             instance_type=a.instance_type)
     print(json.dumps({"tuned": tuned, "base": base}, indent=2, default=str))
-    baselines = {}
+    if not a.dry_run:  # saved before the baselines, so a Bedrock failure can't lose the job names
+        _save_state("eval", {"splitId": state["splitId"], "tuned": tuned["jobName"],
+                             "base": base["jobName"], "baselines": a.baselines})
     for key in a.baselines:  # Bedrock calls run here, row by row
         m = baseline.run_sonnet_baseline(state["splitId"], max_new_tokens=32, baseline_key=key)
-        baselines[key] = {k: m.get(k) for k in ("count", "normalized_match", "exact_match")}
-        print(f"[baseline] {key}: {baselines[key]}" + (" (canned dry-run responses)" if a.dry_run else ""))
-    if not a.dry_run:
-        _save_state("eval", {"splitId": state["splitId"], "tuned": tuned["jobName"],
-                             "base": base["jobName"], "baselines": list(baselines)})
+        summary = {k: m.get(k) for k in ("count", "normalized_match", "exact_match")}
+        print(f"[baseline] {key}: {summary}" + (" (canned dry-run responses)" if a.dry_run else ""))
 
 
 def _cloud_table(a: argparse.Namespace) -> None:
@@ -240,12 +243,13 @@ _CANNED = {
     "Converse": {"output": {"message": {"role": "assistant", "content": [{"text": "small-model"}]}},
                  "usage": {"inputTokens": 0, "outputTokens": 0}},
 }
-_SECRET_WORDS = ("TOKEN", "SECRET", "PASSWORD", "ACCESS_KEY", "API_KEY")
+# TOKEN(?!S): HF_TOKEN / AWS_SESSION_TOKEN are secrets, SLM_EVAL_MAX_NEW_TOKENS is not.
+_SECRET_KEY = re.compile(r"TOKEN(?!S)|SECRET|PASSWORD|ACCESS_KEY|API_KEY")
 
 
 def _redact(obj):
     if isinstance(obj, dict):
-        return {k: ("<redacted>" if any(w in str(k).upper() for w in _SECRET_WORDS) and isinstance(v, str)
+        return {k: ("<redacted>" if _SECRET_KEY.search(str(k).upper()) and isinstance(v, str)
                     else "<body omitted>" if k == "Body" else _redact(v)) for k, v in obj.items()}
     if isinstance(obj, list):
         return [_redact(v) for v in obj]

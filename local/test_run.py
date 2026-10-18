@@ -37,6 +37,6 @@ assert set(n for argv in (["all"], ["all", "--local"], ["publish"]) for n in ste
 
 a = run.parse_args(["train"])
 assert (a.region, a.instance_type, a.model, a.local, a.dry_run) == ("us-east-1", "ml.g5.xlarge", None, False, False)
-assert run._redact({"Environment": {"HF_TOKEN": "x", "PYTHONUNBUFFERED": "1"}, "Key": "a/b", "Body": b".."}) == \
-    {"Environment": {"HF_TOKEN": "<redacted>", "PYTHONUNBUFFERED": "1"}, "Key": "a/b", "Body": "<body omitted>"}
+assert run._redact({"Environment": {"HF_TOKEN": "x", "SLM_EVAL_MAX_NEW_TOKENS": "512"}, "Key": "a/b", "Body": b".."}) == \
+    {"Environment": {"HF_TOKEN": "<redacted>", "SLM_EVAL_MAX_NEW_TOKENS": "512"}, "Key": "a/b", "Body": "<body omitted>"}
 print("test_run ok")

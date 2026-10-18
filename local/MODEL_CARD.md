@@ -15,8 +15,6 @@ datasets:
   - SolvrenAI/class1-router-synthetic
 ---
 
-<!-- DRAFT — private repo, pending review. -->
-
 # Class 1 Decider router (Qwen3-0.6B, MLX)
 
 A small request router. It reads one user request and replies with one of four routes, so a

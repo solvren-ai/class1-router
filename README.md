@@ -134,7 +134,8 @@ local/      Class 1 Decider router: local (MLX) + cloud CLI — see "Commands"
 | AWS CDK CLI | v2 (`npm install -g aws-cdk`) | `infra/requirements.txt` requires `aws-cdk-lib>=2.140,<3` — a range, not a lockfile, so two deploys can resolve different CDK versions |
 | Python | 3.11 or newer | `backend/pyproject.toml` sets `requires-python = ">=3.11"` |
 | Docker | running | `cdk deploy` builds the backend Lambda container image from `backend/Dockerfile` and runs `npm ci && npm run build` in a container. The Lambda image is built for `linux/amd64` regardless of the host; on an Apple Silicon Mac, Docker Desktop builds it under emulation, which is slower but needs no extra setup |
-| uv | current | Only for `agent/`, which has a `uv.lock`. `agent/.python-version` pins Python 3.10 |
+| uv | current | For `agent/` and `local/`, which have a `uv.lock`. `agent/.python-version` pins Python 3.10 |
+| Apple Silicon Mac | M-series, 16GB | Only for `local/run.py --local`: mlx-lm runs on the Mac GPU (Metal) |
 
 Also needed before the platform can do real work:
 
@@ -399,8 +400,8 @@ uv run python run.py all --local --iters 20 --limit 16 --out /tmp/class1-smoke
   export SLM_TRAINING_IMAGE_URI=$(jq -r '.SlmPlatformInfra.OutTrainingImageUri' ../infra/cdk-outputs.json)
   ```
 
-- **Credentials:** valid AWS credentials for that account, through `AWS_PROFILE` or
-  `SLM_AWS_PROFILE`, or the ambient chain.
+- **Credentials:** valid AWS credentials for that account. Name the profile with `SLM_AWS_PROFILE`:
+  the backend passes the `default` profile explicitly when it is unset, so `AWS_PROFILE` alone is ignored.
 - **Bedrock model access:** enable each model you list in `--baselines` (default Claude Haiku 4.5
   and Amazon Nova Micro) under Bedrock **Model access** in `--region`.
 - **GPU quota:** the account needs a SageMaker Service Quota of at least 1 for
@@ -455,7 +456,7 @@ generator rows. `handwritten` is 50 hand-written requests in a different style.
 | Qwen3-4B-4bit few-shot (not tuned) | 0.894 | 0.840 | 585 |
 
 The template set is easy, so read the hand-written column. There, the fused 0.6B model roughly
-matches an untuned 4B model at about half its p50 latency, and it errs toward over-escalation where
+matches an untuned 4B model at about a third of its p50 latency, and it errs toward over-escalation where
 the 4B misses escalation cases. Latency was measured on a shared machine and is approximate. Full
 numbers, per-class F1, error analysis and limitations are in
 [`local/MODEL_CARD.md`](local/MODEL_CARD.md).
