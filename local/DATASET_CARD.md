@@ -103,3 +103,20 @@ Every row carries the same system prompt, which defines the four routes. Rows in
 ## License
 
 MIT-0, the same as the source repository.
+
+## Citation
+
+If you use this dataset in your work, please cite:
+
+```bibtex
+@misc{solvren2026class1routerdata,
+  title        = {Class 1 Router Synthetic Dataset: Request Routing for Regulated Domains},
+  author       = {{Solvren AI}},
+  year         = {2026},
+  publisher    = {Hugging Face},
+  howpublished = {\url{https://huggingface.co/datasets/SolvrenAI/class1-router-synthetic}},
+  note         = {Code: https://github.com/solvren-ai/class1-router}
+}
+```
+
+Adapted from aws-samples/sample-slm-finetuning-and-evaluation-platform (MIT-0).

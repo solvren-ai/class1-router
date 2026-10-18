@@ -213,3 +213,20 @@ From `local/` in the [source repository](https://github.com/solvren-ai/class1-ro
 uv sync
 uv run python run.py all --local      # data -> LoRA train -> fuse -> eval (all models x both test sets) -> table
 ```
+
+## Citation
+
+If you use this model in your work, please cite:
+
+```bibtex
+@misc{solvren2026class1router,
+  title        = {Class 1 Decider Router: Qwen3-0.6B LoRA for LLM Request Routing},
+  author       = {{Solvren AI}},
+  year         = {2026},
+  publisher    = {Hugging Face},
+  howpublished = {\url{https://huggingface.co/SolvrenAI/class1-router-qwen3-0.6b-mlx}},
+  note         = {Code: https://github.com/solvren-ai/class1-router}
+}
+```
+
+Built on Qwen3-0.6B (Qwen Team, Apache-2.0) and adapted from aws-samples/sample-slm-finetuning-and-evaluation-platform (MIT-0).
