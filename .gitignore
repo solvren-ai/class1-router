@@ -31,3 +31,14 @@ frontend/tsconfig.tsbuildinfo
 .env
 .env.*
 !.env.example
+
+# Local Mac (MLX) path: adapter weights, merged models and the uv venv are
+# build artifacts — regenerate them with local/mac_router.py.
+local/adapters/
+local/merged/
+local/.venv/
+local/data/mlx/
+local/runs/
+
+# run.py cloud state: last SageMaker job names (account-specific).
+local/cloud/

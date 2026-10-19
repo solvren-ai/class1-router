@@ -1,0 +1,11 @@
+{
+  "model": "mlx-community/Qwen3-0.6B-bf16",
+  "train_seconds": 110.3,
+  "iters": 400,
+  "batch_size": 2,
+  "num_layers": 8,
+  "max_seq_length": 512,
+  "learning_rate": 0.0001,
+  "grad_checkpoint": true,
+  "mask_prompt": true
+}

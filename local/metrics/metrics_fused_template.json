@@ -1,0 +1,112 @@
+{
+  "target": "fused",
+  "test_set": "template",
+  "model": "merged",
+  "adapter": null,
+  "few_shot_examples": 0,
+  "count": 256,
+  "accuracy": 0.9961,
+  "macro_f1": 0.9961,
+  "per_class": {
+    "small-model": {
+      "support": 64,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0
+    },
+    "frontier-model": {
+      "support": 64,
+      "precision": 0.9846,
+      "recall": 1.0,
+      "f1": 0.9922
+    },
+    "retrieval": {
+      "support": 64,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0
+    },
+    "refuse-or-escalate": {
+      "support": 64,
+      "precision": 1.0,
+      "recall": 0.9844,
+      "f1": 0.9921
+    }
+  },
+  "unparsed": 0,
+  "confusion": {
+    "small-model": {
+      "small-model": 64
+    },
+    "frontier-model": {
+      "frontier-model": 64
+    },
+    "retrieval": {
+      "retrieval": 64
+    },
+    "refuse-or-escalate": {
+      "refuse-or-escalate": 63,
+      "frontier-model": 1
+    }
+  },
+  "latency_ms": {
+    "mean": 216.2,
+    "p50": 196.1,
+    "p90": 289.4,
+    "p99": 399.3
+  },
+  "platform_metrics": {
+    "count": 256,
+    "exact_match": 0.9961,
+    "exact_match_extracted": 0.9961,
+    "normalized_match": 0.9961,
+    "contains_gold": 0.9961,
+    "contains_gold_extracted": 0.9961,
+    "token_f1": 0.9961,
+    "rouge_l": 0.9961,
+    "char_f1": 0.9982,
+    "length_ratio": 1.0,
+    "scaffold_rate": 0.0,
+    "json_valid": null,
+    "json_structural": null,
+    "json_key_recall": null,
+    "json_rows": 0,
+    "numeric_match": null,
+    "numeric_rows": 0,
+    "label_accuracy": 0.9961,
+    "label_rows": 256,
+    "chosen_win_rate": null,
+    "chosen_win_rate_rows": 0,
+    "task_mix": {
+      "label": 256
+    },
+    "per_class_accuracy": {
+      "frontiermodel": {
+        "total": 64,
+        "correct": 64,
+        "accuracy": 1.0
+      },
+      "refuseorescalate": {
+        "total": 64,
+        "correct": 63,
+        "accuracy": 0.9844
+      },
+      "retrieval": {
+        "total": 64,
+        "correct": 64,
+        "accuracy": 1.0
+      },
+      "smallmodel": {
+        "total": 64,
+        "correct": 64,
+        "accuracy": 1.0
+      }
+    }
+  },
+  "decoding": {
+    "temperature": 0.0,
+    "max_new_tokens": 32,
+    "seed": 42
+  },
+  "predictions": null
+}
