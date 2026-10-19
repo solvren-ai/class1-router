@@ -22,7 +22,9 @@ configs:
         path: valid.jsonl
       - split: test
         path: test.jsonl
-      - split: handwritten_test
+  - config_name: handwritten
+    data_files:
+      - split: test
         path: handwritten_test.jsonl
 ---
 
@@ -41,34 +43,41 @@ request labelled with one of four routes:
 
 ## Splits
 
-| Split | Rows | How it was made |
-| --- | --- | --- |
-| `train` | 1,024 | templates |
-| `validation` | 256 | templates, unseen core requests |
-| `test` | 256 | templates, unseen core requests |
-| `handwritten_test` | 50 | written by hand, different style |
+| Config | Split | File | Rows | How it was made |
+| --- | --- | --- | --- | --- |
+| `default` | `train` | `train.jsonl` | 1,024 | templates |
+| `default` | `validation` | `valid.jsonl` | 256 | templates, unseen core requests |
+| `default` | `test` | `test.jsonl` | 256 | templates, unseen core requests |
+| `handwritten` | `test` | `handwritten_test.jsonl` | 50 | written by hand, different style |
 
-The three template splits are balanced: 25% of rows per route. `handwritten_test` has 12 or 13
-rows per route.
+The three template splits are balanced: 25% of rows per route. The `handwritten` test split has 12
+or 13 rows per route. It is a separate config because its rows carry an extra `source` column.
+
+```python
+from datasets import load_dataset
+
+ds = load_dataset("SolvrenAI/class1-router-synthetic")                                # train / validation / test
+hw = load_dataset("SolvrenAI/class1-router-synthetic", "handwritten", split="test")  # 50 hand-written rows
+```
 
 ## How it was built
 
 - **Template splits:** generated offline by
-  [`local/gen_router_data.py`](https://github.com/solvren-ai/class1-router/blob/cb839a10a578adf6ee5a9f81403229dbe508de02/local/gen_router_data.py),
+  [`local/gen_router_data.py`](https://github.com/solvren-ai/class1-router/blob/427789d8f88965ea1b2da357ae274d33f9ef1695/local/gen_router_data.py),
   with no model calls. The grid is 4 domains (healthcare, legal, fintech, biotech) x 4 routes x
   12 core requests, and each core request gets 8 phrasing variants (a greeting, an urgency marker, a
   team prefix and so on) plus fictional slot values (drug name, contract type, assay, record id).
 - **Leakage control:** splitting is by **core request**. A request and all of its phrasings land in
   exactly one split, with 8 core requests per domain and route in train, 2 in validation and 2 in
   test, so the test requests never appear in training in any phrasing.
-- **`handwritten_test`:** 50 requests written by hand to check generalisation beyond the template
+- **`handwritten` config:** 50 requests written by hand to check generalisation beyond the template
   family. They have different phrasing, varied length, typos and lowercase, and a mix of domains
   that includes general business requests outside the four training domains. None of them appears
   in train.
 
 ## Format
 
-Each row uses the platform's canonical chat format:
+Each row uses the chat `messages` format (as in the upstream aws-samples platform and mlx-lm):
 
 ```json
 {"messages": [
@@ -78,8 +87,8 @@ Each row uses the platform's canonical chat format:
  "domain": "healthcare"}
 ```
 
-Every row carries the same system prompt, which defines the four routes. Rows in
-`handwritten_test` also carry `"source": "handwritten"`.
+Every row carries the same system prompt, which defines the four routes. Rows in the
+`handwritten` config also carry `"source": "handwritten"`.
 
 ## Privacy and safety
 
@@ -94,7 +103,7 @@ Every row carries the same system prompt, which defines the four routes. Rows in
 ## Limitations
 
 - Template splits are easy. A model can score near 100% on `test` by learning the template family,
-  so read `handwritten_test` for a more honest signal.
+  so read the `handwritten` config for a more honest signal.
 - English only. The labels reflect one opinionated routing policy, and some requests sit near a
   boundary (for example, a short drafting task could reasonably be `small-model` or
   `frontier-model`).
@@ -110,7 +119,7 @@ If you use this dataset in your work, please cite:
 
 ```bibtex
 @misc{solvren2026class1routerdata,
-  title        = {Class 1 Router Synthetic Dataset: Request Routing for Regulated Domains},
+  title        = {Class 1 Decider Router Synthetic Dataset: Request Routing for Regulated Domains},
   author       = {{Solvren AI}},
   year         = {2026},
   publisher    = {Hugging Face},
@@ -119,4 +128,4 @@ If you use this dataset in your work, please cite:
 }
 ```
 
-Adapted from aws-samples/sample-slm-finetuning-and-evaluation-platform (MIT-0).
+Adapted from [aws-samples/sample-slm-finetuning-and-evaluation-platform](https://github.com/aws-samples/sample-slm-finetuning-and-evaluation-platform) (MIT-0).

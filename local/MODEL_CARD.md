@@ -34,7 +34,7 @@ demo trained on synthetic data, not a production safety system.
 
 - **Repository root:** the fused model, with the LoRA adapter merged into the base weights. It loads
   standalone with `mlx_lm.load`.
-- **`adapter/`:** the LoRA adapter on its own (`adapters.safetensors`, 5.5MB, plus
+- **`adapter/`:** the LoRA adapter on its own (`adapters.safetensors`, 5.5 MiB, plus
   `adapter_config.json`), to apply on top of `mlx-community/Qwen3-0.6B-bf16`.
 
 ## Model details
@@ -66,6 +66,8 @@ SYSTEM = (
 
 ## Use
 
+Requires Apple Silicon: `pip install "mlx-lm>=0.32.2"`
+
 ```python
 from mlx_lm import load, generate
 
@@ -89,14 +91,21 @@ prompt = tok.apply_chat_template(msgs, add_generation_prompt=True, tokenize=Fals
 print(generate(model, tok, prompt=prompt, max_tokens=8))  # -> small-model
 ```
 
-To use the adapter instead of the fused model, download the repository and call
-`load("mlx-community/Qwen3-0.6B-bf16", adapter_path="<local path>/adapter")`.
+To use the adapter instead of the fused model:
+
+```python
+import huggingface_hub
+from mlx_lm import load
+
+p = huggingface_hub.snapshot_download("SolvrenAI/class1-router-qwen3-0.6b-mlx", allow_patterns="adapter/*")
+model, tok = load("mlx-community/Qwen3-0.6B-bf16", adapter_path=f"{p}/adapter")
+```
 
 ## Training data
 
 The training data is [SolvrenAI/class1-router-synthetic](https://huggingface.co/datasets/SolvrenAI/class1-router-synthetic):
-1,536 template-generated rows split 1,024 train / 256 validation / 256 test, plus a 50-row
-hand-written test set.
+1,536 template-generated rows split 1,024 train / 256 validation / 256 test (the `default` config), plus a
+50-row hand-written test set (the `handwritten` config, split `test`).
 
 - **Domains:** healthcare, legal, fintech, biotech.
 - **Privacy:** no real PII or PHI.
@@ -186,9 +195,9 @@ Per-class F1 for the fused model:
   some rows ran under heavier load than others. Compare p50 values within one run, and re-measure on
   your own hardware.
 
-Full metric JSON is in `local/metrics/metrics_<model>_<testset>.json` in the source repository. It
-includes per-class precision and recall, confusion matrices, the platform's own `compute_metrics`
-panel, and every hand-written prediction.
+Full metric JSON is in [`local/metrics/`](https://github.com/solvren-ai/class1-router/tree/427789d8f88965ea1b2da357ae274d33f9ef1695/local/metrics) (`metrics_<model>_<testset>.json`). It
+includes per-class precision and recall, confusion matrices, the upstream aws-samples platform's
+`compute_metrics` panel, and every hand-written prediction.
 
 ## Limitations
 
@@ -206,7 +215,7 @@ panel, and every hand-written prediction.
 
 ## How to reproduce
 
-From `local/` in the [source repository](https://github.com/solvren-ai/class1-router)
+From `local/` in the [source repository](https://github.com/solvren-ai/class1-router/tree/427789d8f88965ea1b2da357ae274d33f9ef1695/local)
 (Apple Silicon, uv):
 
 ```bash
@@ -229,4 +238,19 @@ If you use this model in your work, please cite:
 }
 ```
 
-Built on Qwen3-0.6B (Qwen Team, Apache-2.0) and adapted from aws-samples/sample-slm-finetuning-and-evaluation-platform (MIT-0).
+Built on Qwen3-0.6B (Qwen Team, Apache-2.0), trained with [mlx-lm](https://github.com/ml-explore/mlx-lm) (MIT), and adapted from [aws-samples/sample-slm-finetuning-and-evaluation-platform](https://github.com/aws-samples/sample-slm-finetuning-and-evaluation-platform) (MIT-0).
+
+Please also cite the base model:
+
+```bibtex
+@misc{qwen3technicalreport,
+  title         = {Qwen3 Technical Report},
+  author        = {{Qwen Team}},
+  year          = {2025},
+  eprint        = {2505.09388},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.CL},
+  url           = {https://arxiv.org/abs/2505.09388}
+}
+```
+
