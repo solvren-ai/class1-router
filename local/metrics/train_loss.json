@@ -1,0 +1,190 @@
+{
+ "source": "same-config re-run of `run.py train --local` (mlx-lm LoRA, seed 42), not the original published run; mlx-lm logs train loss as the mean over each 10-iteration window and val loss on 8 val batches every 100 iterations, rounded to 3 decimals",
+ "model": "mlx-community/Qwen3-0.6B-bf16",
+ "iters": 400,
+ "seed": 42,
+ "train": [
+  {
+   "iter": 10,
+   "loss": 1.198
+  },
+  {
+   "iter": 20,
+   "loss": 0.425
+  },
+  {
+   "iter": 30,
+   "loss": 0.274
+  },
+  {
+   "iter": 40,
+   "loss": 0.171
+  },
+  {
+   "iter": 50,
+   "loss": 0.14
+  },
+  {
+   "iter": 60,
+   "loss": 0.096
+  },
+  {
+   "iter": 70,
+   "loss": 0.084
+  },
+  {
+   "iter": 80,
+   "loss": 0.051
+  },
+  {
+   "iter": 90,
+   "loss": 0.038
+  },
+  {
+   "iter": 100,
+   "loss": 0.054
+  },
+  {
+   "iter": 110,
+   "loss": 0.112
+  },
+  {
+   "iter": 120,
+   "loss": 0.017
+  },
+  {
+   "iter": 130,
+   "loss": 0.007
+  },
+  {
+   "iter": 140,
+   "loss": 0.004
+  },
+  {
+   "iter": 150,
+   "loss": 0.002
+  },
+  {
+   "iter": 160,
+   "loss": 0.001
+  },
+  {
+   "iter": 170,
+   "loss": 0.0
+  },
+  {
+   "iter": 180,
+   "loss": 0.0
+  },
+  {
+   "iter": 190,
+   "loss": 0.0
+  },
+  {
+   "iter": 200,
+   "loss": 0.0
+  },
+  {
+   "iter": 210,
+   "loss": 0.0
+  },
+  {
+   "iter": 220,
+   "loss": 0.0
+  },
+  {
+   "iter": 230,
+   "loss": 0.001
+  },
+  {
+   "iter": 240,
+   "loss": 0.0
+  },
+  {
+   "iter": 250,
+   "loss": 0.001
+  },
+  {
+   "iter": 260,
+   "loss": 0.0
+  },
+  {
+   "iter": 270,
+   "loss": 0.0
+  },
+  {
+   "iter": 280,
+   "loss": 0.0
+  },
+  {
+   "iter": 290,
+   "loss": 0.0
+  },
+  {
+   "iter": 300,
+   "loss": 0.0
+  },
+  {
+   "iter": 310,
+   "loss": 0.0
+  },
+  {
+   "iter": 320,
+   "loss": 0.0
+  },
+  {
+   "iter": 330,
+   "loss": 0.0
+  },
+  {
+   "iter": 340,
+   "loss": 0.0
+  },
+  {
+   "iter": 350,
+   "loss": 0.0
+  },
+  {
+   "iter": 360,
+   "loss": 0.0
+  },
+  {
+   "iter": 370,
+   "loss": 0.0
+  },
+  {
+   "iter": 380,
+   "loss": 0.0
+  },
+  {
+   "iter": 390,
+   "loss": 0.0
+  },
+  {
+   "iter": 400,
+   "loss": 0.0
+  }
+ ],
+ "val": [
+  {
+   "iter": 1,
+   "loss": 5.798
+  },
+  {
+   "iter": 100,
+   "loss": 0.083
+  },
+  {
+   "iter": 200,
+   "loss": 0.041
+  },
+  {
+   "iter": 300,
+   "loss": 0.001
+  },
+  {
+   "iter": 400,
+   "loss": 0.004
+  }
+ ]
+}

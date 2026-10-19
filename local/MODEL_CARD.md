@@ -125,6 +125,8 @@ The training data is [SolvrenAI/class1-router-synthetic](https://huggingface.co/
 | Hardware | MacBook Pro (Apple M5, 16 GB unified memory), shared with other local workloads |
 | Wall-clock | 110 s |
 
+The per-step train/val loss in [`local/metrics/train_loss.json`](https://github.com/solvren-ai/class1-router/blob/main/local/metrics/train_loss.json) comes from a same-config re-run (seed 42), not the original run, which logged loss only to the terminal.
+
 ## Evaluation
 
 Every model gets the same system prompt, greedy decoding (temperature 0, max 32 new tokens) and

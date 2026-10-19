@@ -8,7 +8,7 @@
     uv run python run.py eval --local             # MLX eval matrix -> metrics/
     uv run python run.py eval                     # SageMaker vLLM eval + Bedrock baselines
     uv run python run.py table                    # summary of local (+ fetched cloud) metrics
-    uv run python run.py publish                  # push model + dataset to HF (private)
+    uv run python run.py publish                  # push model + dataset to HF (creates private, updates existing)
     uv run python run.py all [--local]            # data -> train -> (fuse) -> eval -> table
     uv run python run.py train --dry-run          # print the AWS requests, send nothing
 
@@ -368,14 +368,21 @@ def step_publish(a: argparse.Namespace) -> None:
         shutil.copy(HERE / "DATASET_CARD.md", data_dir / "README.md")
 
         targets = [(HF_DATA_REPO, "dataset", data_dir), (HF_MODEL_REPO, "model", model_dir)]
-        for repo_id, rtype, _ in targets:  # check both before uploading either
-            api.create_repo(repo_id, repo_type=rtype, private=True, exist_ok=True)
-            if not api.repo_info(repo_id, repo_type=rtype).private:
-                sys.exit(f"{repo_id} exists and is PUBLIC; refusing to upload")
+        _prepare_repos(api, targets)  # check both before uploading either
         for repo_id, rtype, folder in targets:
             api.upload_folder(repo_id=repo_id, repo_type=rtype, folder_path=str(folder),
                               commit_message="Update from run.py publish")
-            print(f"published (private): https://huggingface.co/{'datasets/' if rtype == 'dataset' else ''}{repo_id}")
+            print(f"published: https://huggingface.co/{'datasets/' if rtype == 'dataset' else ''}{repo_id}")
+
+
+def _prepare_repos(api, targets: list) -> None:
+    """Never CREATE a public repo; updating an existing repo (public or private) is allowed."""
+    for repo_id, rtype, _ in targets:
+        if api.repo_exists(repo_id, repo_type=rtype):
+            continue
+        api.create_repo(repo_id, repo_type=rtype, private=True)
+        if not api.repo_info(repo_id, repo_type=rtype).private:
+            sys.exit(f"{repo_id} was created PUBLIC; refusing to upload")
 
 
 # ------------------------------------------------------------------- main ---

@@ -54,4 +54,33 @@ def guarded(*argv: str) -> bool:
 assert guarded("eval", "--local") and guarded("all", "--local")
 assert not guarded("eval", "--local", "--force") and not guarded("all", "--local", "--out", "/tmp/x")
 assert not guarded("train") and not guarded("data")  # cloud and data never touch adapters/merged/metrics
+
+
+class FakeHf:  # publish: create only private repos, update existing ones whatever their visibility
+    def __init__(self, existing, created_private=True):
+        self.existing, self.created_private, self.created = existing, created_private, []
+
+    def repo_exists(self, repo_id, repo_type):
+        return repo_id in self.existing
+
+    def create_repo(self, repo_id, repo_type, private):
+        assert private
+        self.created.append(repo_id)
+
+    def repo_info(self, repo_id, repo_type):
+        return type("Info", (), {"private": self.created_private})()
+
+
+targets = [("o/data", "dataset", None), ("o/model", "model", None)]
+api = FakeHf(existing={"o/data", "o/model"}, created_private=False)  # both public and existing: allowed
+run._prepare_repos(api, targets)
+assert api.created == []
+api = FakeHf(existing={"o/data"})
+run._prepare_repos(api, targets)
+assert api.created == ["o/model"]
+try:
+    run._prepare_repos(FakeHf(existing=set(), created_private=False), targets)  # org forces public: refuse
+    raise AssertionError("created public repo accepted")
+except SystemExit:
+    pass
 print("test_run ok")

@@ -353,7 +353,7 @@ uv run python run.py all --dry-run       # print every AWS request; nothing is s
 # Either mode
 uv run python run.py table               # local metrics table (+ cloud results once jobs finish)
 uv run python run.py table --out runs/1  # the same for a separate local run
-uv run python run.py publish             # model + dataset -> Hugging Face SolvrenAI, private repos
+uv run python run.py publish             # model + dataset -> Hugging Face SolvrenAI (new repos private)
 
 uv run python test_run.py                # self-check: argument parsing and mode dispatch
 ```
@@ -370,8 +370,8 @@ The cloud `eval` scores the trained model and the base model on SageMaker. It al
 baselines named by `--baselines` (default `haiku-4-5 nova-micro`; keys in `backend/app/baseline.py`).
 
 `all` never publishes. `publish` reads `HF_TOKEN` from the environment, or from `--env-file` (default
-`../.env` next to the repository), into memory only. It creates or updates **private** repos and
-refuses to upload to a repo that is public.
+`../.env` next to the repository), into memory only. It never creates a public repo: a missing
+repo is created **private**, and an existing repo (public or private) is updated.
 
 Shared flags:
 
