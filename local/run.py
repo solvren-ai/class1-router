@@ -58,6 +58,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     shared.add_argument("--limit", type=int, default=None, help="eval only the first N rows")
     shared.add_argument("--out", default=None,
                         help="local: write adapters/merged/metrics here instead of local/")
+    shared.add_argument("--force", action="store_true",
+                        help="local: overwrite the published adapters/, merged/ and metrics/ in local/")
     shared.add_argument("--baselines", nargs="*", default=DEFAULT_BASELINES,
                         help="cloud eval: Bedrock baseline keys (backend/app/baseline.py)")
     shared.add_argument("--env-file", default=str(REPO.parent / ".env"),
@@ -75,6 +77,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         ap.error("fuse is local-only (--local); the cloud job merges in-container via export.yaml")
     if a.step == "publish" and a.dry_run:
         ap.error("publish talks to Hugging Face, not AWS; --dry-run does not apply")
+    if a.step == "publish" and a.out:
+        ap.error("publish uploads the published local/ artifacts; --out (smoke runs) does not apply")
     return a
 
 
@@ -92,6 +96,21 @@ def plan(a: argparse.Namespace) -> list[str]:
 
 
 # ------------------------------------------------------------- local steps ---
+
+def _guard_published(a: argparse.Namespace, steps: list[str]) -> None:
+    """Local train/fuse/eval write into local/ by default, where the published
+    adapter, merged model and metrics live. Refuse to replace them silently."""
+    if a.out or a.force:
+        return
+    import mac_router
+
+    outputs = {"train:local": mac_router.ADAPTERS / "adapters.safetensors",
+               "fuse:local": mac_router.FUSED, "eval:local": mac_router.METRICS}
+    hit = [str(outputs[s].relative_to(HERE)) for s in steps if s in outputs and outputs[s].exists()]
+    if hit:
+        sys.exit(f"would overwrite the published {', '.join(hit)}: pass --out DIR for a separate run, "
+                 "or --force to replace them")
+
 
 def _local_env(a: argparse.Namespace) -> None:
     """Point mac_router at --model/--out. Must run before mac_router is imported."""
@@ -348,10 +367,12 @@ def step_publish(a: argparse.Namespace) -> None:
             shutil.copy(mac_router.DATA / f"{n}.jsonl", data_dir)
         shutil.copy(HERE / "DATASET_CARD.md", data_dir / "README.md")
 
-        for repo_id, rtype, folder in [(HF_DATA_REPO, "dataset", data_dir), (HF_MODEL_REPO, "model", model_dir)]:
+        targets = [(HF_DATA_REPO, "dataset", data_dir), (HF_MODEL_REPO, "model", model_dir)]
+        for repo_id, rtype, _ in targets:  # check both before uploading either
             api.create_repo(repo_id, repo_type=rtype, private=True, exist_ok=True)
             if not api.repo_info(repo_id, repo_type=rtype).private:
                 sys.exit(f"{repo_id} exists and is PUBLIC; refusing to upload")
+        for repo_id, rtype, folder in targets:
             api.upload_folder(repo_id=repo_id, repo_type=rtype, folder_path=str(folder),
                               commit_message="Update from run.py publish")
             print(f"published (private): https://huggingface.co/{'datasets/' if rtype == 'dataset' else ''}{repo_id}")
@@ -375,6 +396,7 @@ def main(argv: list[str] | None = None) -> None:
     a = parse_args(argv)
     _local_env(a)
     sys.path.insert(0, str(HERE))
+    _guard_published(a, plan(a))
     with dry_run(a.dry_run):
         for name in plan(a):
             print(f"== {name}", flush=True)

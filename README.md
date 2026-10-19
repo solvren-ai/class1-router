@@ -336,11 +336,12 @@ uv sync --extra cloud                    # + sagemaker/boto3/pyyaml for the clou
 
 uv run python run.py data                # dataset -> data/router/, data/mlx/ (same in both modes)
 
-# Local (Mac, no AWS)
-uv run python run.py train --local       # LoRA -> adapters/ (~2 min on an M5)
-uv run python run.py fuse --local        # adapter merged into merged/
-uv run python run.py eval --local        # 6 models x 2 test sets -> metrics/ (~20 min)
-uv run python run.py all --local         # data -> train -> fuse -> eval -> table
+# Local (Mac, no AWS). local/ holds the published adapters/, merged/ and metrics/, so these
+# refuse to write there: pass --out DIR for a new run, or --force to replace the published run.
+uv run python run.py train --local --out runs/1  # LoRA -> runs/1/adapters/ (~2 min on an M5)
+uv run python run.py fuse --local --out runs/1   # adapter merged into runs/1/merged/
+uv run python run.py eval --local --out runs/1   # 6 models x 2 test sets -> runs/1/metrics/ (~20 min)
+uv run python run.py all --local --out runs/1    # data -> train -> fuse -> eval -> table
 
 # Cloud (AWS account with the stack deployed)
 uv run python run.py train               # SageMaker training job (LLaMA-Factory image), ml.g5.xlarge
@@ -351,6 +352,7 @@ uv run python run.py all --dry-run       # print every AWS request; nothing is s
 
 # Either mode
 uv run python run.py table               # local metrics table (+ cloud results once jobs finish)
+uv run python run.py table --out runs/1  # the same for a separate local run
 uv run python run.py publish             # model + dataset -> Hugging Face SolvrenAI, private repos
 
 uv run python test_run.py                # self-check: argument parsing and mode dispatch
@@ -381,6 +383,7 @@ Shared flags:
 | `--region` | `us-east-1` | AWS region for the cloud path |
 | `--instance-type` | `ml.g5.xlarge` | SageMaker instance for the training and eval jobs |
 | `--iters`, `--limit`, `--out` | `400`, all rows, `local/` | smoke runs: LoRA iterations, eval rows, and a separate output dir so the real artifacts aren't overwritten |
+| `--force` | off | local: let `train`/`fuse`/`eval` replace the published `local/adapters/`, `merged/` and `metrics/` |
 
 A smoke test of the whole local chain takes about 2 minutes:
 
@@ -393,7 +396,7 @@ uv run python run.py all --local --iters 20 --limit 16 --out /tmp/class1-smoke
 - **Stack deployed:** run `cdk deploy` from `infra/` (see [Deploy](#deploy)). The cloud path uses
   its data bucket, its SageMaker execution role and the LLaMA-Factory training image
   (`OutTrainingImageUri`). The backend derives their default names from the account. When your
-  deployment differs, point it at the stack outputs:
+  deployment differs, point it at the stack outputs (needs `jq`):
 
   ```bash
   export SLM_S3_BUCKET=$(jq -r '.SlmPlatformInfra.OutDataBucket' ../infra/cdk-outputs.json)
@@ -410,7 +413,7 @@ uv run python run.py all --local --iters 20 --limit 16 --out /tmp/class1-smoke
 - **Cost:** `train` and `eval` launch billable jobs. Use `--dry-run` to review exactly what will be
   sent.
 
-Build artifacts are gitignored: `local/adapters/`, `local/merged/`, `local/data/mlx/`,
+Build artifacts are gitignored: `local/adapters/`, `local/merged/`, `local/data/mlx/`, `local/runs/`,
 `local/cloud/` (the last cloud job names) and `local/.venv/`.
 
 ### What `local/` contains
@@ -442,8 +445,8 @@ This is the same methodology rule `backend/app/split.py` enforces for the hosted
 
 ### Reference result
 
-Qwen3-0.6B (Apache-2.0) with LoRA on an Apple M5 with 16GB: 1,024 training rows, 400 iterations,
-110 seconds of training, then fused. Greedy decoding throughout. `template` is the 256 held-out
+Qwen3-0.6B (Apache-2.0) with LoRA on a MacBook Pro (Apple M5, 16 GB): 1,024 training rows, 400
+iterations, 110 seconds of training, then fused. Greedy decoding throughout. `template` is the 256 held-out
 generator rows. `handwritten` is 50 hand-written requests in a different style.
 
 | Model | template acc | handwritten acc | p50 ms (template) |
@@ -456,8 +459,8 @@ generator rows. `handwritten` is 50 hand-written requests in a different style.
 | Qwen3-4B-4bit few-shot (not tuned) | 0.894 | 0.840 | 585 |
 
 The template set is easy, so read the hand-written column. There, the fused 0.6B model roughly
-matches an untuned 4B model at about a third of its p50 latency, and it errs toward over-escalation where
-the 4B misses escalation cases. Latency was measured on a shared machine and is approximate. Full
+matches an untuned 4B model (0.88 vs 0.90, one request apart) at a third to a half of its p50
+latency, and it errs toward over-escalation where the 4B misses escalation cases. Latency was measured on a shared machine and is approximate. Full
 numbers, per-class F1, error analysis and limitations are in
 [`local/MODEL_CARD.md`](local/MODEL_CARD.md).
 

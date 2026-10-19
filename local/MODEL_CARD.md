@@ -122,7 +122,7 @@ The training data is [SolvrenAI/class1-router-synthetic](https://huggingface.co/
 | Max sequence length | 512 |
 | Gradient checkpointing | on |
 | Seed | 42 |
-| Hardware | Apple M5, 16GB unified memory, shared with other local workloads |
+| Hardware | MacBook Pro (Apple M5, 16 GB unified memory), shared with other local workloads |
 | Wall-clock | 110 s |
 
 ## Evaluation
@@ -177,7 +177,8 @@ Per-class F1 for the fused model:
 - **The template test set is easy.** 0.996 there mostly shows that the model learned the template
   family. The hand-written set is the more honest signal: **0.88**, with 6 errors in 50.
 - **The fused 0.6B model roughly matches an untuned 4B model on hand-written requests** (0.88 vs
-  0.90) at about a third of the p50 latency. The 4B model is far ahead of the untuned 0.6B in either
+  0.90, one request apart at n=50) at a third to a half of the p50 latency (137 vs 382 ms
+  hand-written, 196 vs 383 ms template). The 4B model is far ahead of the untuned 0.6B in either
   prompting mode.
 - **The two models fail in different directions.** Five of the fused model's 6 hand-written errors
   route a harmless request to `refuse-or-escalate`, such as a billing-or-scheduling email triage, or
@@ -189,10 +190,11 @@ Per-class F1 for the fused model:
   examples in the prompt, the 4B often just performed the request (it wrote the bullets, translated
   the text) instead of routing it.
 - **Fusing cuts latency** with no change in hand-written accuracy: p50 dropped from 239 ms to 196 ms on
-  the template set, measured back to back, because the separate LoRA matmuls are gone.
-- **Latency figures are approximate.** They are single-request mlx-lm Python API calls on a shared
-  16GB M5 that was running other ML jobs at the same time, so tail latency (p90/p99) is noisy and
-  some rows ran under heavier load than others. Compare p50 values within one run, and re-measure on
+  the template set, measured back to back. That is the expected direction once the separate LoRA
+  matmuls are gone, but it is one measurement on a noisy machine.
+- **Latency figures are approximate.** They are single-request mlx-lm Python API calls on a
+  shared 16 GB M5 MacBook Pro that was running other ML jobs at the same time, so tail latency
+  (p90/p99) is noisy and some rows ran under heavier load than others. Compare p50 values within one run, and re-measure on
   your own hardware.
 
 Full metric JSON is in [`local/metrics/`](https://github.com/solvren-ai/class1-router/tree/427789d8f88965ea1b2da357ae274d33f9ef1695/local/metrics) (`metrics_<model>_<testset>.json`). It
@@ -220,7 +222,7 @@ From `local/` in the [source repository](https://github.com/solvren-ai/class1-ro
 
 ```bash
 uv sync
-uv run python run.py all --local      # data -> LoRA train -> fuse -> eval (all models x both test sets) -> table
+uv run python run.py all --local --out runs/repro   # data -> LoRA train -> fuse -> eval -> table, in runs/repro/
 ```
 
 ## Citation
